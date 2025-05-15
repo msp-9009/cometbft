@@ -88,9 +88,11 @@ type State struct {
 
 	// create and execute blocks
 	blockExec *sm.BlockExecutor
+	BlockExec *sm.BlockExecutor
 
 	// notify us if txs are available
 	txNotifier txNotifier
+	TxNotifier txNotifier
 
 	// add evidence to the pool
 	// when it's detected
@@ -159,8 +161,10 @@ func NewState(
 	cs := &State{
 		config:           config,
 		blockExec:        blockExec,
+		BlockExec:        blockExec,
 		blockStore:       blockStore,
 		txNotifier:       txNotifier,
+		TxNotifier:       txNotifier,
 		peerMsgQueue:     make(chan msgInfo, msgQueueSize),
 		internalMsgQueue: make(chan msgInfo, msgQueueSize),
 		timeoutTicker:    NewTimeoutTicker(),
@@ -385,7 +389,9 @@ func (cs *State) OnStart() error {
 
 	// schedule the first round!
 	// use GetRoundState so we don't race the receiveRoutine for access
-	cs.scheduleRound0(cs.GetRoundState())
+	// if cs.state.InitialHeight < 3 {
+	// 	cs.scheduleRound0(cs.GetRoundState())
+	// }
 
 	return nil
 }
@@ -761,6 +767,7 @@ func (cs *State) receiveRoutine(maxSteps int) {
 
 		select {
 		case <-cs.txNotifier.TxsAvailable():
+			cs.Logger.Info("txs available")
 			cs.handleTxsAvailable()
 
 		case mi = <-cs.peerMsgQueue:
@@ -988,6 +995,7 @@ func (cs *State) handleTxsAvailable() {
 // NOTE: cs.StartTime was already set for height.
 func (cs *State) enterNewRound(height int64, round int32) {
 	logger := cs.Logger.With("height", height, "round", round)
+	logger.Info("entering new round", "current", log.NewLazySprintf("%v/%v/%v", cs.Height, cs.Round, cs.Step))
 
 	if cs.Height != height || round < cs.Round || (cs.Round == round && cs.Step != cstypes.RoundStepNewHeight) {
 		logger.Debug(
@@ -1050,6 +1058,10 @@ func (cs *State) enterNewRound(height int64, round int32) {
 	} else {
 		cs.enterPropose(height, round)
 	}
+}
+
+func (cs *State) BlockCreationInit() {
+	cs.scheduleRound0(&cs.RoundState)
 }
 
 // needProofBlock returns true on the first height (so the genesis app hash is signed right away)
@@ -1745,9 +1757,12 @@ func (cs *State) finalizeCommit(height int64) {
 		logger.Error("failed to get private validator pubkey", "err", err)
 	}
 
+	logger.Info("updated state", "state ********", log.NewLazySprintf("%v", cs.state.LastBlockHeight))
 	// cs.StartTime is already set.
 	// Schedule Round0 to start soon.
-	cs.scheduleRound0(&cs.RoundState)
+	// if cs.Height < 10 {
+	// 	cs.scheduleRound0(&cs.RoundState)
+	// }
 
 	// By here,
 	// * cs.Height has been increment to height+1
